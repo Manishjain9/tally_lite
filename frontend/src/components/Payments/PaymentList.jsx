@@ -8,10 +8,12 @@ import toast from 'react-hot-toast';
 
 export function PaymentList() {
   const [sales, setSales] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [customers, setCustomers] = useState({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [selectedCustomerForPayment, setSelectedCustomerForPayment] = useState(null);
   const [selectedSale, setSelectedSale] = useState(null);
   const [selectedPaymentHistory, setSelectedPaymentHistory] = useState([]);
   const [editingPayment, setEditingPayment] = useState(null);
@@ -46,6 +48,10 @@ export function PaymentList() {
       const salesResult = await salesAPI.getAll(1, 1000);
       const allSales = Array.isArray(salesResult?.data) ? salesResult.data : [];
 
+      // Fetch all payments
+      const paymentsResult = await paymentAPI.getAllPayments(1, 1000);
+      const allPayments = Array.isArray(paymentsResult?.data) ? paymentsResult.data : [];
+
       // Fetch customer names
       const customersResult = await customerAPI.getAll(1, 1000);
       const customerMap = {};
@@ -55,6 +61,7 @@ export function PaymentList() {
 
       setCustomers(customerMap);
       setSales(allSales);
+      setPayments(allPayments);
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error('Failed to load data');
@@ -63,13 +70,13 @@ export function PaymentList() {
     }
   };
 
-  const handleRecordPayment = async (sale) => {
-    setSelectedSale(sale);
+  const handleRecordPayment = (customerName, totalBalance) => {
+    setSelectedCustomerForPayment({ name: customerName, totalBalance });
     setEditingPayment(null);
     setShowForm(true);
     setFormData({
       amount_received: '',
-      payment_type: '',
+      payment_type: 'Cash',
       reference_number: '',
     });
   };
@@ -80,8 +87,8 @@ export function PaymentList() {
     setShowForm(true);
     setFormData({
       amount_received: payment.amount_received.toString(),
-      payment_type: payment.payment_type || '',
-      reference_number: payment.reference_number || '',
+      payment_type: 'Cash',
+      reference_number: '',
     });
   };
 
@@ -127,22 +134,43 @@ export function PaymentList() {
       return;
     }
 
-    if (formData.payment_type && formData.payment_type !== 'Cash' && !formData.reference_number.trim()) {
-      toast.error(`Reference number is required for ${formData.payment_type}`);
-      return;
-    }
 
     try {
       if (editingPayment) {
         // Edit existing payment
         await paymentAPI.updatePayment(editingPayment.online_payment_id, {
           amount_received: parseFloat(formData.amount_received),
-          payment_type: formData.payment_type || null,
-          reference_number: formData.reference_number || null,
+          payment_type: 'Cash',
+          reference_number: null,
         });
         toast.success('✓ Payment updated successfully!');
-      } else {
-        // Record new payment
+      } else if (selectedCustomerForPayment) {
+        // Customer-level payment: apply to first unpaid sale of this customer
+        const customerName = selectedCustomerForPayment.name;
+        const unpaidSales = sales.filter(s =>
+          customers[s.customer_id] === customerName &&
+          (s.balance_amount > 0)
+        );
+
+        if (unpaidSales.length === 0) {
+          toast.error('No pending sales for this customer');
+          return;
+        }
+
+        if (parseFloat(formData.amount_received) > parseFloat(selectedCustomerForPayment.totalBalance)) {
+          toast.error('Amount cannot exceed total pending balance');
+          return;
+        }
+
+        // Record payment to first unpaid sale
+        const firstUnpaidSale = unpaidSales[0];
+        await paymentAPI.recordPayment(firstUnpaidSale.sale_id, {
+          amount_received: parseFloat(formData.amount_received),
+          payment_type: 'Cash',
+        });
+        toast.success('✓ Payment recorded successfully!');
+      } else if (selectedSale) {
+        // Sale-level payment (from history modal)
         if (parseFloat(formData.amount_received) > parseFloat(selectedSale.balance_amount)) {
           toast.error('Amount cannot exceed balance due');
           return;
@@ -150,17 +178,19 @@ export function PaymentList() {
 
         await paymentAPI.recordPayment(selectedSale.sale_id, {
           amount_received: parseFloat(formData.amount_received),
-          payment_type: formData.payment_type || null,
-          reference_number: formData.reference_number || null,
+          payment_type: 'Cash',
+          reference_number: null,
         });
         toast.success('✓ Payment recorded successfully!');
       }
 
       setShowForm(false);
       setEditingPayment(null);
+      setSelectedCustomerForPayment(null);
+      setSelectedSale(null);
       setFormData({
         amount_received: '',
-        payment_type: '',
+        payment_type: 'Cash',
         reference_number: '',
       });
 
@@ -236,11 +266,6 @@ export function PaymentList() {
             <div className="space-y-6">
               {Object.entries(
                 sales.reduce((grouped, sale) => {
-                  // Filter based on view mode
-                  if (viewMode === 'outstanding' && sale.payment_status === 'Paid') {
-                    return grouped;
-                  }
-
                   const customerName = customers[sale.customer_id] || 'Unknown Customer';
                   if (!grouped[customerName]) {
                     grouped[customerName] = [];
@@ -248,93 +273,88 @@ export function PaymentList() {
                   grouped[customerName].push(sale);
                   return grouped;
                 }, {})
-              ).map(([customerName, customerSales]) => {
+              ).sort((a, b) => a[0].localeCompare(b[0]))
+              .map(([customerName, customerSales]) => {
                 const isExpanded = expandedCustomers[customerName] === true;
                 const totalAmount = customerSales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
-                const totalBalance = customerSales.reduce((sum, s) => {
-                  // Calculate balance from payment_tracking info if available
-                  return sum + (s.balance_amount ? parseFloat(s.balance_amount) : 0);
-                }, 0);
+                const customerPayments = payments.filter(p => p.customer_name === customerName && parseFloat(p.amount_received || 0) > 0);
+                const totalReceived = customerPayments.reduce((sum, p) => sum + parseFloat(p.amount_received || 0), 0);
+                const totalBalance = Math.max(0, totalAmount - totalReceived);
 
                 return (
                 <div key={customerName} className="bg-white rounded-xl shadow-lg overflow-hidden">
-                  <div className="bg-gradient-to-r from-green-600 to-green-700 px-6 py-4">
+                  <div
+                    onClick={() => toggleCustomer(customerName)}
+                    className="bg-gradient-to-r from-green-600 to-green-700 px-6 py-4 cursor-pointer hover:from-green-700 hover:to-green-800 transition"
+                  >
                     <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-3 flex-1">
-                        <button
-                          onClick={() => toggleCustomer(customerName)}
-                          className="text-white hover:bg-green-800 rounded-full p-1 transition"
-                          title={isExpanded ? 'Collapse' : 'Expand'}
-                        >
+                      <div className="flex items-center gap-3">
+                        <span className="text-white text-xl">
                           {isExpanded ? '▼' : '▶'}
-                        </button>
+                        </span>
                         <h3 className="text-lg font-bold text-white">💳 {customerName}</h3>
-                        <span className="ml-2 text-green-100 text-sm">({customerSales.length} sales)</span>
                       </div>
-                      <div className="flex items-center gap-6 text-right">
+                      <div className="flex items-center gap-4 text-right">
                         <div>
                           <p className="text-xs text-green-100">Total Sales</p>
                           <p className="font-bold text-white">{formatCurrency(totalAmount)}</p>
                         </div>
                         {viewMode === 'outstanding' && totalBalance > 0 && (
+                          <>
+                            <div>
+                              <p className="text-xs text-green-100">Pending Balance</p>
+                              <p className="font-bold text-white">{formatCurrency(totalBalance)}</p>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRecordPayment(customerName, totalBalance);
+                              }}
+                              className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded font-semibold transition"
+                              title="Record payment for this customer"
+                            >
+                              💰 Pay
+                            </button>
+                          </>
+                        )}
+                        {viewMode === 'all' && (
                           <div>
-                            <p className="text-xs text-green-100">Pending Balance</p>
-                            <p className="font-bold text-white">{formatCurrency(totalBalance)}</p>
+                            <p className="text-xs text-green-100">Received</p>
+                            <p className="font-bold text-white">{formatCurrency(totalReceived)}</p>
                           </div>
                         )}
                       </div>
                     </div>
                   </div>
                   {isExpanded && (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gradient-to-r from-gray-100 to-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 whitespace-nowrap">Sale #</th>
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 whitespace-nowrap">Sale Date</th>
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 whitespace-nowrap">Amount</th>
-                          {viewMode === 'outstanding' && <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 whitespace-nowrap">Balance Due</th>}
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 whitespace-nowrap">Status</th>
-                          <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 whitespace-nowrap">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {customerSales.map((sale, index) => (
-                          <tr key={sale.sale_id} className={`hover:bg-green-50 transition ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                            <td className="px-6 py-3 text-sm font-semibold text-gray-900">#{sale.sale_id}</td>
-                            <td className="px-6 py-3 text-sm text-gray-600 whitespace-nowrap">{formatDate(sale.sale_date)}</td>
-                            <td className="px-6 py-3 text-sm font-semibold text-gray-900">{formatCurrency(sale.total_amount)}</td>
-                            {viewMode === 'outstanding' && <td className="px-6 py-3 text-sm font-bold text-red-600">{formatCurrency(sale.balance_amount || 0)}</td>}
-                            <td className="px-6 py-3 text-sm">
-                              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                                sale.payment_status === 'Paid' ? 'bg-green-100 text-green-800' :
-                                sale.payment_status === 'Partially Paid' ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-red-100 text-red-800'
-                              }`}>
-                                {sale.payment_status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-3 text-sm space-x-2 flex">
-                              <button
-                                onClick={() => viewPaymentHistory(sale)}
-                                className="text-blue-600 hover:text-blue-800 font-semibold hover:underline transition text-xs"
-                              >
-                                History
-                              </button>
-                              {(sale.payment_status === 'Pending' || sale.payment_status === 'Partially Paid') && (
-                                <button
-                                  onClick={() => handleRecordPayment(sale)}
-                                  className="text-green-600 hover:text-green-800 font-semibold hover:underline transition text-xs"
-                                >
-                                  Pay
-                                </button>
-                              )}
-                            </td>
-                          </tr>
+                    <div className="p-4 border-t border-gray-200">
+                      <div className="space-y-2">
+                        {/* Sales */}
+                        {customerSales.map((sale) => (
+                          <div key={`sale-${sale.sale_id}`} className="flex justify-between items-center p-3 bg-blue-50 rounded hover:bg-blue-100 transition">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs text-blue-600 font-semibold px-2 py-1 bg-blue-200 rounded">SALE</span>
+                              <p className="text-sm font-medium text-gray-900">{formatDate(sale.sale_date)}</p>
+                            </div>
+                            <p className="text-sm font-semibold text-blue-700">{formatCurrency(sale.total_amount)}</p>
+                          </div>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+
+                        {/* Payments */}
+                        {payments.filter(p => p.customer_name === customerName && parseFloat(p.amount_received || 0) > 0).map((payment) => {
+                          const paymentDate = payment.payment_date || payment.created_at || payment.date_created || payment.timestamp;
+                          return (
+                            <div key={`payment-${payment.online_payment_id}`} className="flex justify-between items-center p-3 bg-green-50 rounded hover:bg-green-100 transition">
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs text-green-600 font-semibold px-2 py-1 bg-green-200 rounded">PAYMENT</span>
+                                {paymentDate && <p className="text-sm font-medium text-gray-900">{formatDate(paymentDate)}</p>}
+                              </div>
+                              <p className="text-sm font-semibold text-green-700">{formatCurrency(payment.amount_received)}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
                 </div>
                 );
@@ -351,13 +371,46 @@ export function PaymentList() {
               </h2>
 
               <div className="mb-5 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="text-sm text-gray-700">
-                  Customer: <span className="font-bold text-gray-900">{selectedSale?.customer_name}</span>
-                </p>
-                {!editingPayment && (
-                  <p className="text-sm text-gray-700 mt-2">
-                    Balance Due: <span className="font-bold text-red-600 text-lg">{formatCurrency(selectedSale?.balance_amount)}</span>
-                  </p>
+                {selectedCustomerForPayment ? (
+                  <>
+                    <p className="text-sm text-gray-700">
+                      Customer: <span className="font-bold text-gray-900">{selectedCustomerForPayment?.name}</span>
+                    </p>
+                    {!editingPayment && (
+                      <>
+                        <p className="text-sm text-gray-700 mt-2">
+                          Total Pending Balance: <span className="font-bold text-red-600 text-lg">{formatCurrency(selectedCustomerForPayment?.totalBalance)}</span>
+                        </p>
+                        {formData.amount_received && (
+                          <p className="text-sm text-gray-700 mt-2">
+                            Remaining Balance: <span className="font-bold text-green-600 text-lg">
+                              {formatCurrency(Math.max(0, parseFloat(selectedCustomerForPayment?.totalBalance || 0) - parseFloat(formData.amount_received || 0)))}
+                            </span>
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-700">
+                      Sale Balance: <span className="font-bold text-gray-900">{formatCurrency(selectedSale?.balance_amount)}</span>
+                    </p>
+                    {!editingPayment && (
+                      <>
+                        <p className="text-sm text-gray-700 mt-2">
+                          Outstanding: <span className="font-bold text-red-600 text-lg">{formatCurrency(selectedSale?.balance_amount)}</span>
+                        </p>
+                        {formData.amount_received && (
+                          <p className="text-sm text-gray-700 mt-2">
+                            Remaining: <span className="font-bold text-green-600 text-lg">
+                              {formatCurrency(Math.max(0, parseFloat(selectedSale?.balance_amount || 0) - parseFloat(formData.amount_received || 0)))}
+                            </span>
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -365,13 +418,13 @@ export function PaymentList() {
                 <div>
                   <label className="block text-sm font-semibold mb-2 text-gray-700">
                     Amount {editingPayment ? 'Paid' : 'Received'} *
-                    {!editingPayment && <span className="text-gray-500 font-normal ml-2">(Max: {formatCurrency(selectedSale?.balance_amount)})</span>}
+                    {!editingPayment && <span className="text-gray-500 font-normal ml-2">(Max: {formatCurrency(selectedCustomerForPayment?.totalBalance || selectedSale?.balance_amount)})</span>}
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
-                    max={!editingPayment ? selectedSale?.balance_amount : undefined}
+                    max={!editingPayment ? (selectedCustomerForPayment?.totalBalance || selectedSale?.balance_amount) : undefined}
                     placeholder="Enter amount"
                     value={formData.amount_received}
                     onChange={(e) => setFormData({ ...formData, amount_received: e.target.value })}
@@ -381,35 +434,6 @@ export function PaymentList() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-700">Payment Mode</label>
-                  <select
-                    value={formData.payment_type}
-                    onChange={(e) => setFormData({ ...formData, payment_type: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select payment mode...</option>
-                    <option value="Cash">💵 Cash</option>
-                    <option value="UPI">📱 UPI</option>
-                    <option value="Bank Transfer">🏦 Bank Transfer</option>
-                    <option value="Cheque">📄 Cheque</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-700">
-                    Reference Number
-                    {formData.payment_type && formData.payment_type !== 'Cash' && <span className="text-red-500"> *</span>}
-                    {formData.payment_type === 'Cash' && <span className="text-gray-500 font-normal">(Optional for Cash)</span>}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder={formData.payment_type === 'Cash' ? 'Leave empty for cash' : 'Transaction ID / Cheque # / Reference'}
-                    value={formData.reference_number}
-                    onChange={(e) => setFormData({ ...formData, reference_number: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
 
                 <div className="flex gap-3 pt-6">
                   <button
@@ -495,7 +519,14 @@ export function PaymentList() {
               <div className="flex gap-2 pt-6 mt-6 border-t">
                 <button
                   onClick={() => {
-                    handleRecordPayment(selectedSale);
+                    setSelectedSale(null);
+                    setEditingPayment(null);
+                    setShowForm(true);
+                    setFormData({
+                      amount_received: '',
+                      payment_type: '',
+                      reference_number: '',
+                    });
                     setShowHistory(false);
                   }}
                   className="flex-1 bg-blue-600 text-white py-2 rounded font-semibold hover:bg-blue-700"

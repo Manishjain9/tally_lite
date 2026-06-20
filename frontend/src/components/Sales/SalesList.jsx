@@ -18,6 +18,7 @@ export function SalesList() {
   const [expandedCustomers, setExpandedCustomers] = useState({});
   const [paymentCustomer, setPaymentCustomer] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [preSelectedCustomerName, setPreSelectedCustomerName] = useState(null);
 
   useEffect(() => {
     fetchCustomers();
@@ -124,7 +125,11 @@ export function SalesList() {
               <p className="text-blue-100 text-sm mt-1">Track and manage your sales transactions</p>
             </div>
             <button
-              onClick={() => setShowForm(true)}
+              onClick={() => {
+                setEditingSale(null);
+                setPreSelectedCustomerName(null);
+                setShowForm(true);
+              }}
               className="bg-white text-blue-600 px-6 py-2 rounded-lg hover:bg-blue-50 font-semibold transition shadow-md"
             >
               + New Sale
@@ -151,23 +156,24 @@ export function SalesList() {
                   grouped[customerName].push(sale);
                   return grouped;
                 }, {})
-              ).map(([customerName, customerSales]) => {
+              ).sort((a, b) => a[0].localeCompare(b[0]))
+              .map(([customerName, customerSales]) => {
                 const isExpanded = expandedCustomers[customerName] === true;
                 const customerId = customerSales[0]?.customer_id;
                 const totalAmount = customerSales.reduce((sum, sale) => sum + parseFloat(sale.total_amount || 0), 0);
+                const sortedSales = [...customerSales].sort((a, b) => new Date(b.sale_date) - new Date(a.sale_date));
 
                 return (
                 <div key={customerName} className="bg-white rounded-xl shadow-lg overflow-hidden">
-                  <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+                  <div
+                    onClick={() => toggleCustomer(customerName)}
+                    className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 cursor-pointer hover:from-blue-700 hover:to-blue-800 transition"
+                  >
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-3 flex-1">
-                        <button
-                          onClick={() => toggleCustomer(customerName)}
-                          className="text-white hover:bg-blue-800 rounded-full p-1 transition"
-                          title={isExpanded ? 'Collapse' : 'Expand'}
-                        >
+                        <span className="text-white text-xl">
                           {isExpanded ? '▼' : '▶'}
-                        </button>
+                        </span>
                         <h3 className="text-lg font-bold text-white">👤 {customerName}</h3>
                         <span className="ml-2 text-blue-100 text-sm">({customerSales.length} sales)</span>
                       </div>
@@ -178,11 +184,16 @@ export function SalesList() {
                         </div>
                         {customerId && (
                           <button
-                            onClick={() => setPaymentCustomer({ id: customerId, name: customerName })}
-                            className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-sm font-semibold transition"
-                            title="Add payment for this customer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingSale(null);
+                              setPreSelectedCustomerName(customerName);
+                              setShowForm(true);
+                            }}
+                            className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm font-semibold transition"
+                            title="Add new sale for this customer"
                           >
-                            💰 Pay
+                            ➕ New Sale
                           </button>
                         )}
                       </div>
@@ -203,7 +214,7 @@ export function SalesList() {
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {customerSales.map((sale, index) => (
+                        {sortedSales.map((sale, index) => (
                           <tr key={sale.sale_id} className={`hover:bg-blue-50 transition cursor-pointer ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                             <td className="px-6 py-3 text-sm font-semibold text-gray-900 whitespace-nowrap"># {sale.sale_id}</td>
                             <td className="px-6 py-3 text-sm text-gray-600 whitespace-nowrap">{formatDate(sale.sale_date)}</td>
@@ -259,8 +270,10 @@ export function SalesList() {
             onCancel={() => {
               setShowForm(false);
               setEditingSale(null);
+              setPreSelectedCustomerName(null);
             }}
             editingSale={editingSale}
+            preSelectedCustomerName={preSelectedCustomerName}
           />
         )}
 

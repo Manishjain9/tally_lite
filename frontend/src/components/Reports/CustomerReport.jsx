@@ -45,7 +45,7 @@ export function CustomerReport({ onBack }) {
       const filtered = customers.filter(c =>
         c.name.toLowerCase().includes(value.toLowerCase()) ||
         c.mobile?.includes(value)
-      );
+      ).sort((a, b) => a.name.localeCompare(b.name));
       setFilteredCustomers(filtered);
     } else {
       setFilteredCustomers([]);

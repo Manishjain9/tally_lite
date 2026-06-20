@@ -91,7 +91,7 @@ export function ExpenseList() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {expenses.map((expense, index) => (
+                    {[...expenses].sort((a, b) => new Date(b.expense_date) - new Date(a.expense_date)).map((expense, index) => (
                       <tr key={expense.expense_id} className={`hover:bg-blue-50 transition ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                         <td className="px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">{formatDate(expense.expense_date)}</td>
                         <td className="px-6 py-4 text-sm text-gray-600 whitespace-nowrap">

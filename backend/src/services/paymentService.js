@@ -66,7 +66,7 @@ class PaymentService {
       await connection.execute(
         `INSERT INTO online_payments (payment_id, reference_number, payment_type, payment_date, amount_received)
          VALUES (?, ?, ?, NOW(), ?)`,
-        [paymentId[0].payment_id, reference_number || null, payment_type || null, amount_received]
+        [paymentId[0].payment_id, reference_number || null, payment_type || 'Cash', amount_received]
       );
 
       await connection.commit();
@@ -300,7 +300,7 @@ class PaymentService {
         `UPDATE online_payments
          SET amount_received = ?, payment_type = ?, reference_number = ?
          WHERE online_payment_id = ?`,
-        [amount_received, payment_type || null, reference_number || null, paymentId]
+        [amount_received, payment_type || 'Cash', reference_number || null, paymentId]
       );
 
       await connection.commit();

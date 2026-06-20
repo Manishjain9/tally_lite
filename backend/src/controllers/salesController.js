@@ -124,6 +124,19 @@ class SalesController {
       next(error);
     }
   }
+
+  async getProductList(req, res, next) {
+    try {
+      const userId = req.userId;
+      const products = await salesService.getProductList(userId);
+
+      res.status(STATUS_CODES.OK).json(
+        helpers.successResponse(products)
+      );
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = new SalesController();

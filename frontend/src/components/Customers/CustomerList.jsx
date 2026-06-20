@@ -134,7 +134,7 @@ export function CustomerList() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {customers.map((customer, index) => (
+                    {[...customers].sort((a, b) => a.name.localeCompare(b.name)).map((customer, index) => (
                       <tr key={customer.customer_id} className={`hover:bg-blue-50 transition ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                         <td className="px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">{customer.name}</td>
                         <td className="px-6 py-4 text-sm text-gray-600 whitespace-nowrap">{customer.mobile || '—'}</td>

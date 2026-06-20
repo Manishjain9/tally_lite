@@ -21,6 +21,10 @@ export const salesAPI = {
     const result = await client.get('/sales/daily-total', { params: { date } });
     return result.data;
   },
+  getProductList: async () => {
+    const result = await client.get('/sales/products/list');
+    return result.data;
+  },
   update: async (id, data) => {
     const result = await client.put(`/sales/${id}`, data);
     return result.data;

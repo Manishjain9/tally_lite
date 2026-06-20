@@ -3,7 +3,7 @@ import { salesAPI } from '../../api/salesAPI';
 import { customerAPI } from '../../api/customerAPI';
 import toast from 'react-hot-toast';
 
-export function SalesForm({ onSuccess, onCancel, editingSale }) {
+export function SalesForm({ onSuccess, onCancel, editingSale, preSelectedCustomerName }) {
   const getFormattedDate = (dateStr) => {
     if (!dateStr) return new Date().toISOString().split('T')[0];
     // Ensure date is in YYYY-MM-DD format
@@ -16,8 +16,8 @@ export function SalesForm({ onSuccess, onCancel, editingSale }) {
   const [formData, setFormData] = useState({
     customer_id: editingSale?.customer_id || '',
     sale_date: getFormattedDate(editingSale?.sale_date),
-    payment_mode: editingSale?.payment_mode || 'Cash',
-    payment_status: editingSale?.payment_status || 'Pending',
+    payment_mode: 'Cash',
+    payment_status: 'Pending',
     remarks: editingSale?.remarks || '',
   });
 
@@ -38,8 +38,17 @@ export function SalesForm({ onSuccess, onCancel, editingSale }) {
 
   useEffect(() => {
     fetchCustomers();
-    loadProductHistory();
+    fetchProductList();
   }, []);
+
+  const fetchProductList = async () => {
+    try {
+      const result = await salesAPI.getProductList();
+      setProductHistory(result || []);
+    } catch (error) {
+      console.error('Failed to load products:', error);
+    }
+  };
 
   useEffect(() => {
     if (editingSale && customers.length > 0) {
@@ -47,8 +56,15 @@ export function SalesForm({ onSuccess, onCancel, editingSale }) {
       if (customer) {
         setSearchTerm(customer.name);
       }
+    } else if (preSelectedCustomerName && customers.length > 0) {
+      const customer = customers.find(c => c.name === preSelectedCustomerName);
+      if (customer) {
+        setSearchTerm(customer.name);
+        setFormData(prev => ({ ...prev, customer_id: customer.customer_id }));
+        setShowCustomerDropdown(false);
+      }
     }
-  }, [editingSale, customers]);
+  }, [editingSale, preSelectedCustomerName, customers]);
 
   useEffect(() => {
     const handleEscape = (e) => {
@@ -148,25 +164,14 @@ export function SalesForm({ onSuccess, onCancel, editingSale }) {
           p.toLowerCase().startsWith(searchTerm) || p.toLowerCase().includes(searchTerm)
         );
 
-        // Show filtered or recent products
+        // Show filtered products only
         setFilteredProducts(prev => ({
           ...prev,
-          [index]: filtered.length > 0 ? filtered : productHistory.slice(0, 20)
+          [index]: filtered
         }));
-
-        // Add new product to history
-        if (!productHistory.some(p => p.toLowerCase().trim() === searchTerm)) {
-          const trimmedValue = value.trim();
-          const updated = [trimmedValue, ...productHistory].filter((p, i, arr) =>
-            arr.findIndex(x => x.toLowerCase() === p.toLowerCase()) === i
-          );
-          const limited = updated.slice(0, 100);
-          setProductHistory(limited);
-          saveProductHistory(limited);
-        }
       } else {
-        // Show recent products when empty
-        setFilteredProducts(prev => ({ ...prev, [index]: productHistory.slice(0, 20) }));
+        // Show all products when empty
+        setFilteredProducts(prev => ({ ...prev, [index]: productHistory }));
       }
     }
 
@@ -323,34 +328,6 @@ export function SalesForm({ onSuccess, onCancel, editingSale }) {
               )}
             </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-1">Payment Mode</label>
-              <select
-                name="payment_mode"
-                value={formData.payment_mode}
-                onChange={handleFormChange}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option>Cash</option>
-                <option>UPI</option>
-                <option>Bank Transfer</option>
-                <option>Cheque</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Payment Status</label>
-              <select
-                name="payment_status"
-                value={formData.payment_status}
-                onChange={handleFormChange}
-                className="w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option>Paid</option>
-                <option>Partially Paid</option>
-                <option>Pending</option>
-              </select>
-            </div>
           </div>
 
           <div>

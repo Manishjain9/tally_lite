@@ -8,6 +8,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.post('/', validateRequest(schemas.salesEntry), salesController.createSale);
+router.get('/products/list', salesController.getProductList);
 router.get('/date-range', salesController.getSalesByDateRange);
 router.get('/daily-total', salesController.getDailySalesTotal);
 router.get('/', salesController.getSales);

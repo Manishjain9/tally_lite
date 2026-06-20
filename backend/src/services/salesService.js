@@ -109,7 +109,7 @@ class SalesService {
 
     try {
       const { offset } = helpers.buildPaginationQuery(page, limit);
-      let query = 'SELECT s.* FROM sales_entries s WHERE s.user_id = ?';
+      let query = 'SELECT s.*, COALESCE(pt.balance_amount, s.total_amount) as balance_amount, COALESCE(pt.amount_received, 0) as amount_received FROM sales_entries s LEFT JOIN payment_tracking pt ON s.sale_id = pt.sale_id WHERE s.user_id = ?';
       const params = [userId];
 
       if (filters.customerId) {
@@ -339,6 +339,24 @@ class SalesService {
         count: result[0].count || 0,
         total: result[0].total || 0,
       };
+    } finally {
+      connection.release();
+    }
+  }
+
+  async getProductList(userId) {
+    const connection = await pool.getConnection();
+
+    try {
+      const [products] = await connection.execute(
+        `SELECT DISTINCT product_name FROM sales_line_items sli
+         INNER JOIN sales_entries se ON sli.sale_id = se.sale_id
+         WHERE se.user_id = ?
+         ORDER BY product_name ASC`,
+        [userId]
+      );
+
+      return products.map(p => p.product_name);
     } finally {
       connection.release();
     }
